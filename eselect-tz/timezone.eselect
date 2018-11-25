@@ -74,6 +74,14 @@ describe_list() {
 	echo "Show list of available timezones to select from"
 }
 
+describe_list_parameters() {
+	echo "[target]"
+}
+
+describe_list_options() {
+	echo "target (optional) : Name or number of sub-directory to show"
+}
+
 do_list() {
 	local enum directory=$(dir_path $1)
 	[[ -d $directory ]] || die -q "Not a directory!"
@@ -81,10 +89,8 @@ do_list() {
 	targets=( $(dir_list $directory) )
 	relative_directory=$(echo $directory |\
 		sed -E 's/(.*)(\/usr\/share\/zoneinfo\/)(.*)/\3/')
-	current_tz="$(<${EROOT}/etc/timezone)"
-	dir_expression=$(path_to_expr $relative_directory)
-	# I hope to use current_tz and relative_directory
-	# to create a test for using highlight_marker()
+	current_tz_expr="$(path_to_expr $(<${EROOT}/etc/timezone))"
+	dir_expression="$(path_to_expr $relative_directory)"
 
 	write_list_start "Available timezone selections:"
 	
@@ -96,10 +102,14 @@ do_list() {
 
 	echo "Directory: $directory"
 	for ((i=0; i < ${#targets[@]}; i++)); do
+		local item_num="$enum$(expr $i + 1)"
 		if [[ ${targets[i]} =~ .*/$ ]]; then
 			targets[i]=$(highlight "${targets[i]}")
 		fi
-		write_numbered_list_entry "$enum$(expr $i + 1)" ${targets[i]}
+		if [[ $current_tz_expr =~ ^${item_num}(-[0-9]*)*$ ]]; then
+			targets[i]=$(highlight_marker "${targets[i]}")
+		fi
+		write_numbered_list_entry "$item_num" "${targets[i]}"
 	done
 } 
 
@@ -122,6 +132,14 @@ describe_set() {
 	echo "Set a new timezone"
 }
 
+describe_set_parameters() {
+	echo "<target>"
+}
+
+describe_set_options() {
+	echo "target : Target name or number (from 'list' action)"
+}
+
 do_set() { 
 	local directory=$(dir_path $1) 
 	[[ -f $directory ]] || die -q "Not a valid timezone!"
@@ -131,4 +149,33 @@ do_set() {
 	this a Gentoo system?"
 }
 
+
+### Modified methods from eselect overriden
+
+# Only difference is space $(( 4 - ${#1} )) -> $(( 7 - ${#1} ))
+# Overriden since default method cannot handle large numberings
+
+# write_numbered_list_entry PUBLIC
+# Write out a numbered list entry with index $1 and text $2. Args may
+# include text highlighting. If -p is passed, use 'plain' highlighting.
+write_numbered_list_entry() {
+	local left=${COLOUR_LIST_LEFT} right=${COLOUR_LIST_RIGHT}
+	local normal=${COLOUR_NORMAL}
+
+	if [[ $1 == "-p" ]]; then
+		left=; right=; normal=
+		shift
+	fi
+
+	if ! is_output_mode brief; then
+		echo -n -e "  ${left}"
+		echo -n -e "[$(apply_text_highlights "${left}" "$1")]"
+		echo -n -e "${normal}"
+		space $(( 7 - ${#1} ))
+	fi
+
+	echo -n -e "${right}"
+	echo -n -e "$(apply_text_highlights "${right}" "$2")"
+	echo -e "${normal}"
+}
 # vim: ts=4 sw=4 noet fdm=marker
