@@ -36,7 +36,37 @@ dir_path_expr() {
 
 dir_path() {
 	local root="${EROOT}/usr/share/zoneinfo"
-	dir_path_expr $root $1
+	if [[ $1 =~ ^([0-9]*)(-[0-9]*)*$ ]]; then 
+		dir_path_expr $root $1
+	else
+		echo "$root/$1"
+	fi
+}
+
+
+# $1 Base root directory
+# $2 Relative directory to find expression of
+# Helper for path_to_expr
+path_to_expr_echo() {
+	local i root=$1
+	IFS='/' read dir rest <<< $2
+	local dirlist=( $(dir_list $root) )
+	for ((i=0; i<${#dirlist[@]}; i++)); do
+			local cur_dir=$(echo ${dirlist[i]} |\
+					sed 's/\/$//')
+			if [[ $dir = $cur_dir ]]; then
+					echo $(expr $i + 1 )
+					if [[ -n $rest ]]; then
+							path_to_expr_echo "$root/$dir" $rest
+					fi
+					break
+			fi
+	done
+}
+
+path_to_expr() {
+	local expr=( $(path_to_expr_echo "${EROOT}/usr/share/zoneinfo" $1) )
+	IFS='-'; echo "${expr[*]}"
 }
 
 ### list action ###
@@ -45,22 +75,23 @@ describe_list() {
 }
 
 do_list() {
-	[[ $1 =~ ^([0-9]*)(-[0-9])*$ ]] || die -q "Invalid expression!"
 	local enum directory=$(dir_path $1)
-	[[ -d $directory ]] || die -q "Not a valid directory!"
+	[[ -d $directory ]] || die -q "Not a directory!"
+
 	targets=( $(dir_list $directory) )
 	relative_directory=$(echo $directory |\
 		sed -E 's/(.*)(\/usr\/share\/zoneinfo\/)(.*)/\3/')
-	current_tz="$(<${EROOT}/etc/timezone)" 
+	current_tz="$(<${EROOT}/etc/timezone)"
+	dir_expression=$(path_to_expr $relative_directory)
 	# I hope to use current_tz and relative_directory
 	# to create a test for using highlight_marker()
 
 	write_list_start "Available timezone selections:"
 	
-	if [[ -z $1 ]]; then
+	if [[ -z $dir_expression ]]; then
 		enum=""
 	else
-		enum="$1-"
+		enum="$dir_expression-"
 	fi
 
 	echo "Directory: $directory"
@@ -92,11 +123,9 @@ describe_set() {
 }
 
 do_set() { 
-	[[ $1 =~ ^([0-9]+)(-([0-9]*))*$ ]] || die -q "Invalid expression!" 
 	local directory=$(dir_path $1) 
-	[[ -f $directory ]] || die -q "Not a valid file! Did you choose a directory?"
+	[[ -f $directory ]] || die -q "Not a valid timezone!"
 	tz=$(echo $directory | sed -E 's/(.*)(\/usr\/share\/zoneinfo\/)(.*)/\3/')
-	
 	echo $tz > /etc/timezone || die -q "Could not write to /etc/timezone"
 	emerge --config sys-libs/timezone-data || die -q "Could not run emerge, is
 	this a Gentoo system?"
