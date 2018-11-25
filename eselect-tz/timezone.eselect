@@ -3,8 +3,6 @@
 
 DESCRIPTION="Manage the timezone via /etc/timezone"
 MAINTAINER="Ethan Kiang"
-# SVN_DATE='$Date: $'
-# VERSION=$(svn_date_to_version "${SVN_DATE}" )
 
 # Takes in directory parameter,
 # get list of files and directories
@@ -22,58 +20,57 @@ dir_list() {
 	done
 }
 
-# Get path to specified directory
-# $1 is current working directory
-# $2 is the desired directory index within $1
-dir_path() {
-	local zone_root=$1
-	if [[ -z $2 ]]; then
-		echo zone_root
+#$1: Directory  $2: Expression
+dir_path_expr() {
+	local directory=$1
+	IFS='-' read index rest <<< $2
+	if [[ -n $index ]]; then
+		local dirlist=($(dir_list $directory))
+		local new_dir=$(echo $directory/${dirlist[$(expr $index - 1)]} | \
+			sed 's/\/$//')
+		dir_path_expr $new_dir $rest 
 	else
-		target=( $(dir_list "zone_root/$1") )
-		[[ $2 -ge ${#target[@]} || ! ${target[$2]} =~ .*/$ ]] \
-			&& die -q "Not a directory!"
-		echo "$1/${target[$2]}" | sed 's/\/$//' # Remove trailing /
+		echo $directory 
 	fi
 }
 
-# $1 Current Path
-# $2 Path Expression
-dir_path_from_expression() {
-	if [[ -n $2 ]]; then
-		local index=$(sed -r 's/([0-9]*)(.*)$/\1/' $2)
-		truncated=$(sed -r 's/([0-9]*)(-)(.*)$/\3/' $2)
-		new_path=$(dir_path $cur_path $index) 
-		echo "$(dir_path_from_expression $new_path $truncated)"
-	else
-		echo $1
-	fi
-} 
-	
+dir_path() {
+	local root="${EROOT}/usr/share/zoneinfo"
+	dir_path_expr $root $1
+}
 
 ### list action ###
-
 describe_list() {
 	echo "Show list of available timezones to select from"
 }
 
 do_list() {
-	[[ $# -gt 1 ]] && die -q "Too many parameters"
-	[[ -n $1 && ! $1 =~ ([0-9]-)*([0-9])$ ]] && die -q "Invalid target format"
-	local expression=$1 
-	directory=$(dir_path_from_expression \
-		"${EROOT}/usr/share/zoneinfo" $expression)
+	[[ $1 =~ ^([0-9]*)(-[0-9])*$ ]] || die -q "Invalid expression!"
+	local enum directory=$(dir_path $1)
+	[[ -d $directory ]] || die -q "Not a valid directory!"
 	targets=( $(dir_list $directory) )
-	
+	relative_directory=$(echo $directory |\
+		sed -E 's/(.*)(\/usr\/share\/zoneinfo\/)(.*)/\3/')
+	current_tz="$(<${EROOT}/etc/timezone)" 
+	# I hope to use current_tz and relative_directory
+	# to create a test for using highlight_marker()
+
 	write_list_start "Available timezone selections:"
+	
+	if [[ -z $1 ]]; then
+		enum=""
+	else
+		enum="$1-"
+	fi
+
 	echo "Directory: $directory"
 	for ((i=0; i < ${#targets[@]}; i++)); do
-			[[ ${targets[i]} =~ .*/$ ]] \
-				&& targets[i]=$(highlight "${targets[i]}")
+		if [[ ${targets[i]} =~ .*/$ ]]; then
+			targets[i]=$(highlight "${targets[i]}")
+		fi
+		write_numbered_list_entry "$enum$(expr $i + 1)" ${targets[i]}
 	done
-	write_numbered_list "${targets[@]}"
-}
-
+} 
 
 ### show action ###
 describe_show() {
@@ -92,6 +89,17 @@ do_show() {
 ### set action ### 
 describe_set() {
 	echo "Set a new timezone"
+}
+
+do_set() { 
+	[[ $1 =~ ^([0-9]+)(-([0-9]*))*$ ]] || die -q "Invalid expression!" 
+	local directory=$(dir_path $1) 
+	[[ -f $directory ]] || die -q "Not a valid file! Did you choose a directory?"
+	tz=$(echo $directory | sed -E 's/(.*)(\/usr\/share\/zoneinfo\/)(.*)/\3/')
+	
+	echo $tz > /etc/timezone || die -q "Could not write to /etc/timezone"
+	emerge --config sys-libs/timezone-data || die -q "Could not run emerge, is
+	this a Gentoo system?"
 }
 
 # vim: ts=4 sw=4 noet fdm=marker
