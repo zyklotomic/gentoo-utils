@@ -84,7 +84,8 @@ describe_list_parameters() {
 }
 
 describe_list_options() {
-	echo "target (optional) : Name or number of sub-directory to show"
+	echo "target : Name or index of sub-directory to show"
+	echo "	all : List all available timezone choices"
 }
 
 list_timezones() {
@@ -176,7 +177,7 @@ describe_set_parameters() {
 }
 
 describe_set_options() {
-	echo "target : Target name or number (from 'list' action)"
+	echo "target : Target name or index (from 'list' action)"
 }
 
 do_set() { 
