@@ -1,8 +1,10 @@
-# Copyright 1999-2018 Gentoo Foundation 
+# Copyright 1999-2018 Gentoo Foundation
 # Distributed under the terms of the GNU General Public License v2
 
 DESCRIPTION="Manage the timezone via /etc/timezone"
 MAINTAINER="Ethan Kiang"
+
+#### HELPER METHODS ####
 
 # Takes in directory parameter,
 # get list of files and directories
@@ -21,33 +23,33 @@ dir_list() {
 }
 
 #$1: Directory  $2: Expression
-dir_path_expr() {
+index_to_directory() {
 	local directory=$1
 	IFS='-' read index rest <<< $2
 	if [[ -n $index ]]; then
 		local dirlist=($(dir_list $directory))
-		local new_dir=$(echo $directory/${dirlist[$(expr $index - 1)]} | \
+		local new_dir=$(echo $directory/${dirlist[$(( $index - 1))]} | \
 			sed 's/\/$//')
-		dir_path_expr $new_dir $rest 
+		index_to_directory $new_dir $rest 
 	else
 		echo $directory 
 	fi
+	IFS=$' \t\n'
 }
 
-dir_path() {
+get_path() {
 	local root="${EROOT}/usr/share/zoneinfo"
 	if [[ $1 =~ ^([0-9]*)(-[0-9]*)*$ ]]; then 
-		dir_path_expr $root $1
+		index_to_directory $root $1
 	else
 		echo "$root/$1"
 	fi
-}
-
+} 
 
 # $1 Base root directory
 # $2 Relative directory to find expression of
-# Helper for path_to_expr
-path_to_expr_echo() {
+# Helper for directory_to_index
+directory_to_index_helper() {
 	local i root=$1
 	IFS='/' read dir rest <<< $2
 	local dirlist=( $(dir_list $root) )
@@ -55,19 +57,22 @@ path_to_expr_echo() {
 			local cur_dir=$(echo ${dirlist[i]} |\
 					sed 's/\/$//')
 			if [[ $dir = $cur_dir ]]; then
-					echo $(expr $i + 1 )
-					if [[ -n $rest ]]; then
-							path_to_expr_echo "$root/$dir" $rest
-					fi
-					break
+				echo $(($i + 1 ))
+				if [[ -n $rest ]]; then
+					directory_to_index_helper "$root/$dir" $rest
+				fi
+				break
 			fi
 	done
+	IFS=$' \t\n'
 }
 
-path_to_expr() {
-	local expr=( $(path_to_expr_echo "${EROOT}/usr/share/zoneinfo" $1) )
-	IFS='-'; echo "${expr[*]}"
+directory_to_index() {
+		local expr=( $(directory_to_index_helper "${EROOT}/usr/share/zoneinfo" $1) )
+		IFS='-'; echo "${expr[*]}"; IFS=$' \t\n'
 }
+
+#### END OF HELPER METHODS ####
 
 ### list action ###
 describe_list() {
@@ -82,44 +87,78 @@ describe_list_options() {
 	echo "target (optional) : Name or number of sub-directory to show"
 }
 
-do_list() {
-	local enum directory=$(dir_path $1)
-	[[ -d $directory ]] || die -q "Not a directory!"
-
-	targets=( $(dir_list $directory) )
-	relative_directory=$(echo $directory |\
-		sed -E 's/(.*)(\/usr\/share\/zoneinfo\/)(.*)/\3/')
-	current_tz_expr="$(path_to_expr $(<${EROOT}/etc/timezone))"
-	dir_expression="$(path_to_expr $relative_directory)"
-
-	write_list_start "Available timezone selections:"
+list_timezones() {
+	local directory=$1 basedir="${EROOT}/usr/share/zoneinfo"
+	local targets=( $(dir_list $directory) )
+	local relative_directory=$(realpath --relative-base=$basedir $directory)
+	local current_tz_expr="$(directory_to_index $(<${EROOT}/etc/timezone))"
+	local dir_index="$(directory_to_index $relative_directory)" 
+	local enum
 	
-	if [[ -z $dir_expression ]]; then
-		enum=""
-	else
-		enum="$dir_expression-"
-	fi
-
-	echo "Directory: $directory"
+	if [[ -n $dir_index ]]; then enum="$dir_index-"; fi 
+	
 	for ((i=0; i < ${#targets[@]}; i++)); do
 		local item_num="$enum$(expr $i + 1)"
 		if [[ ${targets[i]} =~ .*/$ ]]; then
 			targets[i]=$(highlight "${targets[i]}")
 		fi
+		
 		if [[ $current_tz_expr =~ ^${item_num}(-[0-9]*)*$ ]]; then
 			targets[i]=$(highlight_marker "${targets[i]}")
-		fi
+		fi 
 		write_numbered_list_entry "$item_num" "${targets[i]}"
 	done
-} 
+}
+
+list_timezones_all() { 
+	local directory=$1 basedir="${EROOT}/usr/share/zoneinfo"
+	local targets=( $(dir_list $directory) )
+	local relative_directory=$(realpath --relative-base=$basedir $directory)
+	local current_tz_expr="$(directory_to_index $(<${EROOT}/etc/timezone))"
+	local dir_index="$(directory_to_index $relative_directory)" 
+	local enum i
+	
+	if [[ -n $dir_index ]]; then enum="$dir_index-"; fi
+	for ((i=0; i < ${#targets[@]}; i++)); do
+		local item_num="$enum$(expr $i + 1)"
+		if [[ ${targets[i]} =~ .*/$ ]]; then
+			list_timezones_all "$directory/${targets[i]}"
+		else
+			if [[ $current_tz_expr =~ ^${item_num}(-[0-9]*)*$ ]]; then
+				targets[i]=$(highlight_marker "${targets[i]}")
+			fi
+			local printed_dir
+			if [[ $relative_directory != '.' ]]; then
+				printed_dir="$relative_directory/"
+			fi
+			write_numbered_list_entry "$item_num" "$printed_dir${targets[i]}"
+		fi
+	done
+}
+
+
+do_list() {
+	local basedir="${EROOT}/usr/share/zoneinfo"
+	local directory=$(get_path $1)
+	if [[ $1 = "all" ]]; then
+		list_timezones_all $basedir
+	else
+		[[ -d $directory ]] || die -q "Not a directory!"
+
+		write_list_start "Available timezone selections:"
+
+		echo "Directory: $directory"
+		list_timezones $directory
+	fi
+}
 
 ### show action ###
 describe_show() {
 	echo "Show the currently set timezone"
 }
 
-do_show() {
-	write_list_start "Currently set timezone:"
+do_show() { 
+	write_list_start "Current timezone in /etc/timezone:"
 	if [[ -f ${EROOT}/etc/timezone ]]; then
 		write_kv_list_entry "$(<${EROOT}/etc/timezone)" ""
 	else
@@ -141,9 +180,9 @@ describe_set_options() {
 }
 
 do_set() { 
-	local directory=$(dir_path $1) 
+	local directory=$(get_path $1) basedir="${EROOT}/usr/share/zoneinfo"
 	[[ -f $directory ]] || die -q "Not a valid timezone!"
-	tz=$(echo $directory | sed -E 's/(.*)(\/usr\/share\/zoneinfo\/)(.*)/\3/')
+	tz=$(realpath --relative-base=$basedir $directory)
 	echo $tz > /etc/timezone || die -q "Could not write to /etc/timezone"
 	emerge --config sys-libs/timezone-data || die -q "Could not run emerge, is
 	this a Gentoo system?"
